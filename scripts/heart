@@ -29,4 +29,4 @@ if __name__ == "__main__":
                 renderer.entities[i] = raspi_hat.Dot(dot.position, [255,0,0])
         j = (j+1) % nDots
         renderer.render()
-        time.sleep(0.05)
+        time.sleep(0.01)

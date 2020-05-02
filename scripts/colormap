@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+
+import time
+import sys
+
+# TODO: fix this 
+sys.path.append('../')
+
+import raspi_hat
+
+from sense_hat import SenseHat
+
+if __name__ == "__main__":
+    sense = SenseHat()
+    renderer = raspi_hat.Renderer(sense,[0,0,0])
+    hat = raspi_hat.Entity()
+
+    total_time = 1
+    colorStep = total_time/6.
+
+    cm = raspi_hat.ColorMap()
+    cm.addColor(0 * colorStep,[255,0,0])
+    cm.addColor(1 * colorStep,[255,255,0])
+    cm.addColor(2 * colorStep,[0,255,0])
+    cm.addColor(3 * colorStep,[0,255,255])
+    cm.addColor(4 * colorStep,[0,0,255])
+    cm.addColor(5 * colorStep,[255,0,255])
+    cm.addColor(6 * colorStep,[255,0,0])
+
+    renderer.add(hat)    
+
+    time_done = 0
+    steps = 1000
+    time_step = float(total_time)/steps   
+    while(True):
+        hat = raspi_hat.Entity()
+        hat.matrix.setSolidColor(cm.getColor(time_done))
+        # hat.matrix.setSolidColor([255,0,255])
+        renderer.entities.clear()
+        renderer.add(hat)
+        renderer.render()
+        
+        time_done = time_done + time_step
+        if time_done > total_time:
+            time_done = 0
+        time.sleep(time_step)
