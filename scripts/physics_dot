@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+
+import numpy as np
+import time
+import sys
+
+# TODO: fix this 
+sys.path.append('../')
+
+import raspi_hat
+
+from sense_hat import SenseHat
+
+
+class Particle():
+    def __init__(self,color,position = [0.0,0.0],speed = [0.0,0.0],mass = 1):
+        self._position = position
+        self._speed = speed
+        self._mass = 1
+        self._sprite = raspi_hat.Dot(self._position,color)
+        self._hitbox = [self._position,self._position]
+
+    def updatedPosition(self,delta_time):
+        x = self._position[0]
+        y = self._position[1]
+
+        dx = self._speed[0] * delta_time
+        dy = self._speed[1] * delta_time
+        if x + dx > 8 or x + dx < 0  :
+            dx = -0.8 * dx 
+        if y + dy > 8 or y + dy < 0  :
+            dy = -0.8 * dy
+
+        x = x + dx
+        y = y + dy
+
+        
+        return [x,y]
+
+    def update(self,delta_time):
+        self._position = self.updatedPosition(delta_time)
+        self._sprite.placeAt(self._position)
+
+
+    def addSpeed(self,speed = [0,0]):
+        vx = self._speed[0]
+        vy = self._speed[1]
+
+        dvx = speed[0]
+        dvy = speed[1]
+        self._speed = [vx + dvx, vy + dvy]
+    
+    def brake(self,delta_time):
+        vx = self._speed[0]
+        vy = self._speed[1]        
+
+        alpha = np.e **(-0.8)
+        vx = vx * alpha
+        vy = vy * alpha
+        self._speed = [vx,vy]
+
+    @property
+    def position(self):
+        return self._position
+    
+
+    @property
+    def speed(self):
+        return self._speed
+    
+    @property
+    def sprite(self):
+        return self._sprite
+
+def computeSpeed(orientation,scale = 1):
+    roll = orientation["roll"] * np.pi / 180
+    pitch = orientation["pitch"]* np.pi / 180
+
+    vx = np.sin(roll)
+    vy = np.sin(pitch)
+    
+    vx = vx * scale
+    vy = vy * scale
+    return[vx, -vy]
+
+
+if __name__ == "__main__":
+    hat = SenseHat()
+    
+    particle = Particle(color = [255,0,0],position = [4,4],speed = [0.0,0.0])
+
+    renderer = raspi_hat.Renderer(hat,[0,0,0])
+    renderer.add(particle.sprite)
+    g = 9.81
+
+    start = time.time()
+    while True:
+        
+        now = time.time()
+        delta_time = now - start
+        hat_orientation = hat.get_gyroscope()
+
+        dspeed = computeSpeed(hat_orientation,9.8)    
+        
+        particle.addSpeed(dspeed)
+        particle.update(delta_time)
+        #brake it a little
+        particle.brake(delta_time)
+
+        renderer.render()
+        start = now
+        print(particle.speed)
+        time.sleep(0.001)
+        
