@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+
+import numpy as np
+import time
+import sys
+
+#TODO: my own connected components to get rid of this
+from scipy.ndimage.measurements import label
+
+# TODO: fix this 
+sys.path.append('../')
+import raspi_hat
+
+import sense_hat
+
+class Ball(raspi_hat.Dot):
+    def __init__(self,position = [0,0],rank = 0):
+        self._colorRange = [[0,255,0],
+                            [255,255,0],
+                            [255,128,0],
+                            [255,0,0],
+                            [255,0,255],
+                            [140,0,255],
+                            [0,0,255],
+                            [255,255,255]]
+        raspi_hat.Dot.__init__(self,position,self._colorRange[rank])
+        self._rank = rank
+    @property
+    def colorRange(self):
+        return self._colorRange
+    @property
+    def rank(self):
+        return self._rank
+    
+    
+
+class Piece():
+    def __init__(self,ranks):
+        self._balls = []
+        self._balls.append(Ball([4,6],ranks[0]))
+        self._balls.append(Ball([5,6],ranks[1]))
+    
+    def minX(self):
+        return min(self._balls[0].position[0],self._balls[1].position[0])
+    
+    def maxX(self):
+        return max(self._balls[0].position[0],self._balls[1].position[0]) 
+
+    @property
+    def balls(self):
+        return self._balls
+    
+    def moveRight(self):
+        if self.maxX() >= 7:
+            return
+        for dot in self._balls:
+            dot.move([1,0])
+
+    def moveLeft(self):
+        if self.minX() <= 0:
+            return
+        for dot in self._balls:
+            dot.move([-1,0])
+
+    def rotate(self):
+        areHorizontal = self._balls[0].position[1] == self._balls[1].position[1]
+        leftLimit = self.minX() == 0
+        
+        pivotingMove = [0,0]
+        rotatingMove = [0,0]
+        
+        pivotingId = None
+        rotatingId = None
+
+        if leftLimit:
+            if areHorizontal:
+                pivotingId = 0 if self._balls[0].position[0] < self._balls[1].position[0] else 1
+                pivotingMove = [0,0]
+                rotatingMove = [-1,1]
+            else:
+                pivotingId = 0 if self._balls[0].position[1] < self._balls[1].position[1] else 1
+                pivotingMove = [1,0]
+                rotatingMove = [0,-1]
+        else:
+            if areHorizontal:
+                pivotingId = 0 if self._balls[0].position[0] > self._balls[1].position[0] else 1
+                pivotingMove = [0,0]
+                rotatingMove = [1,1]
+            else:
+                pivotingId = 0 if self._balls[0].position[1] < self._balls[1].position[1] else 1
+                pivotingMove = [-1,0]
+                rotatingMove = [0,-1]
+
+        rotatingId = 1 - pivotingId
+        self._balls[pivotingId].move(pivotingMove)
+        self._balls[rotatingId].move(rotatingMove)
+
+class Board():
+    def __init__(self):
+        
+        self.reset()
+            
+    def reset(self):
+        self._balls = []
+        self._matrix = np.empty((8,8),dtype = Ball)
+
+    @property
+    def balls(self):
+        return self._balls
+
+    def ballOverLimit(self):
+        return any(ball.position[1] >= 6 for ball in self._balls)
+    
+    def pushDown(self):
+        noMovement = True
+        for x in range(self._matrix.shape[0]):
+            emptySpaceBelow = False
+            for y in range(self._matrix.shape[1]):
+                if self._matrix[x,y] != None and emptySpaceBelow: 
+                    self._matrix[x,y].move([0,-1])
+                    self._matrix[x,y-1] = self._matrix[x,y]
+                    self._matrix[x,y] = None
+                    noMovement = False
+                emptySpaceBelow = self._matrix[x,y] == None
+        return noMovement
+
+    def addBall(self,ball):
+        self._matrix[ball.position[0]][ball.position[1]] = ball
+        self._balls.append(ball)
+
+    def addPiece(self,piece):
+
+        ball0 = piece.balls[0]
+        ball1 = piece.balls[1]
+        self.addBall(ball0)
+        self.addBall(ball1)
+
+    def mergeBalls(self,pieceGenerator):
+        # Create matrix
+        components = -np.ones((8,8),np.int)
+        for b in self._balls:
+            pos = b.position
+            x = pos[0]
+            y = pos[1]
+            components[x,y] = b.rank
+
+        ranks = list(set(components.ravel().tolist()))
+        ranks = [el for el in ranks if el != -1]
+
+        balls_to_merge = []
+        unmerged_balls = []
+
+        indices = np.indices(components.shape).T[:,:,[1, 0]]
+
+        for rank in ranks:
+            labeled,nComponents = label(components == rank)
+            for c in range(1,1+nComponents):
+                positions = indices[labeled == c]
+                if len(positions) >= 3:
+                    balls_to_merge.append([Ball(pos,rank) for pos in positions])
+                else:
+                    [unmerged_balls.append(Ball(pos,rank)) for pos in positions]
+
+        self.reset()
+        for ball in unmerged_balls:
+            self.addBall(ball)
+
+        score = 0
+        for merge_group in balls_to_merge:
+            score = score + (1+rank) * 5 * len(merge_group)
+            newRank = merge_group[0].rank +1
+            if(newRank == len(merge_group[0].colorRange)):
+                continue
+            if(newRank > pieceGenerator.currentRank):
+                pieceGenerator.increaseRank()
+            minY = min([b.position[1] for b in merge_group])
+            minX = min([b.position[0] for b in merge_group if b.position[1] == minY])
+
+            self.addBall(Ball([minX,minY],newRank))
+
+        return score
+
+class PieceGenerator():
+    def __init__(self):
+        self._currentRank = 1
+        dummy = Ball([0,0],0)
+        self._maxRank = len(dummy.colorRange)
+
+    def create_new_piece(self):
+        rank0 = np.random.randint(self._currentRank + 1)
+        rank1 = np.random.randint(self._currentRank + 1)
+        
+        piece = Piece([rank0,rank1])
+        
+        return piece
+
+    def increaseRank(self):
+        self._currentRank = min(self._currentRank+1,self._maxRank)
+
+    def reset(self):
+        self._currentRank = 1
+    @property
+    def currentRank(self):
+        return self._currentRank
+    
+
+class Combine():
+    def __init__(self,sensor_hat):
+        self._sensor_hat = sensor_hat
+        self._renderer = raspi_hat.Renderer(sensor_hat,[0,0,0])
+        self._board = Board()
+        self._pieceGenerator = PieceGenerator()
+        self._piece = None
+        
+        # Hook up controls        
+        self._sensor_hat.stick.direction_left = self.movePieceLeft
+        self._sensor_hat.stick.direction_right = self.movePieceRight
+        self._sensor_hat.stick.direction_up = self.rotatePiece
+        self._sensor_hat.stick.direction_down = self.pieceDown
+        self._sensor_hat.stick.direction_middle = self.reset
+        self._sensor_hat.stick.direction_any = self.render
+
+        self._score = 0
+        self._gameEnded = False
+
+    def movePieceRight(self,event):
+        if event.action == sense_hat.ACTION_RELEASED or self._piece == None:
+            return
+        self._piece.moveRight()
+        
+    def movePieceLeft(self,event):
+        if event.action == sense_hat.ACTION_RELEASED or self._piece == None:
+            return
+        self._piece.moveLeft()
+
+    def rotatePiece(self,event):
+        if event.action == sense_hat.ACTION_RELEASED or self._piece == None:
+            return
+        self._piece.rotate()
+
+    def pieceDown(self,event):
+        if event.action == sense_hat.ACTION_RELEASED:
+            return
+        self._board.addPiece(self._piece)
+        self._piece = None
+        self.pushBallsDown()
+        self.create_piece()
+
+    def create_piece(self):
+        self._piece = self._pieceGenerator.create_new_piece()
+
+    def render(self):
+        self._renderer.entities.clear()
+        if(self._piece is not None):
+            self._renderer.add(self._piece.balls[0])
+            self._renderer.add(self._piece.balls[1])
+        for ball in self._board.balls:
+            self._renderer.add(ball)
+        self._renderer.render()
+
+    def pushBallsDown(self):
+        while(True):
+            while(not self._board.pushDown()):
+                time.sleep(0.2)
+                self.render()
+            score = self._board.mergeBalls(self._pieceGenerator)
+            self._score = self._score + score
+            if(score == 0):
+                break
+            else:
+                time.sleep(0.25)
+        
+        self.checkLost()
+
+    def checkLost(self):
+        if self._board.ballOverLimit():
+            self._gameEnded = True
+            while(True):
+                sense.set_rotation(0)
+                self._sensor_hat.show_message(str(self._score))
+                sense.set_rotation(270)
+        
+    def start(self):
+
+        self.create_piece()
+        
+        while(True):
+            pass
+    def reset(self):
+        if not self._gameEnded:
+            return
+        
+        self._gameEnded = False
+        self._board = Board()
+        self._pieceGenerator.reset()
+        self.create_piece()
+        
+        self._score = 0
+
+if __name__ == "__main__":
+    sense = sense_hat.SenseHat()
+
+    # Most comfortable for right hand play
+    sense.set_rotation(270)
+    sense.low_light = True
+    
+    combine = Combine(sense)
+    combine.start()

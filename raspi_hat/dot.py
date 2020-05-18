@@ -33,8 +33,18 @@ class Dot(Entity):
     def position(self):
         return self._position
     
+    def move(self,increment):
+        dx = increment[0]
+        dy = increment[1]
+
+        x = self.position[0]
+        y = self.position[1]
+
+
+        self.placeAt([x+dx, y +dy])
 
     def setColor(self,color):
+        self._color = color
         self.matrix.data[self._position[0],self._position[1]] = self._color
 
     def isInLimits(self,value):
